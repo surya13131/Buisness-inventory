@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f7f6; margin: 0; color: #333; }
+    header {
+      background: #343a40;
+      color: white;
+      padding: 15px 25px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .container {
+      background: white;
+      margin: 20px auto;
+      max-width: 900px;
+      padding: 25px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    h3 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    input, button, select {
+      padding: 12px;
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box; /* Ensures padding doesn't break width */
+    }
+    button {
+      background: #28a745;
+      border: none;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #218838; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    
+    table {
+      width: 100%;
+      margin-top: 20px;
+      border-collapse: collapse;
+    }
+    th { background: #f8f9fa; text-align: left; color: #666; }
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+    }
+    .status-active { color: #28a745; font-weight: bold; }
+    .status-suspended { color: #dc3545; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h2 style="margin:0;">Admin Dashboard</h2>
+  <button onclick="logout()" style="width:auto; background:#dc3545; margin:0;">Logout</button>
+</header>
+
+<div class="container">
+  <h3>Register Company</h3>
+  <input id="companyIdInput" placeholder="Company ID (e.g., comp-001)">
+  <input id="companyNameInput" placeholder="Company Name">
+  <button id="btnCreateCompany" onclick="createCompany()">Create Company</button>
+</div>
+
+<div class="container">
+  <h3>Create Owner User</h3>
+  <input id="ownerEmail" placeholder="Owner Email">
+  <input id="ownerPassword" type="password" placeholder="Temporary Password">
+  <label style="display:block; margin-top:10px; font-size:14px; color:#666;">Assign to Company:</label>
+  <select id="ownerCompanySelect"></select>
+  <button id="btnCreateOwner" onclick="createOwner()">Create Owner</button>
+</div>
+
+<div class="container">
+  <h3>Registered Companies</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody id="companyTable">
+      <tr><td colspan="4" style="text-align:center;">Loading companies...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+/* 🏢 API CONFIGURATION */
+const API_BASE = "https://api-ekhjhuzdja-el.a.run.app";
+
+// Redirect if not logged in
+if (localStorage.getItem("IS_ADMIN") !== "true") {
+  window.location.href = "admin-login.html";
+}
+
+function logout() {
+  localStorage.clear();
+  window.location.href = "admin-login.html";
+}
+
+/**
+ * Universal Fetch Helper with Error Handling
+ */
+async function adminFetch(path, method = "GET", body = null) {
+  try {
+    const options = {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin": "true"
+      }
+    };
+    if (body) options.body = JSON.stringify(body);
+
+    const res = await fetch(`${API_BASE}${path}`, options);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      // Throw the error message sent by the backend
+      throw new Error(data.error || `Error ${res.status}: Request failed`);
+    }
+
+    return data;
+  } catch (err) {
+    console.error("API Error:", err.message);
+    alert(err.message); // Show actual error (e.g., "User already exists")
+    throw err;
+  }
+}
+
+/* --- COMPANIES LOGIC --- */
+
+async function loadCompanies() {
+  try {
+    const companies = await adminFetch("/admin/companies");
+    const tableBody = document.getElementById("companyTable");
+    const dropdown = document.getElementById("ownerCompanySelect");
+
+    if (!companies || companies.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No companies found.</td></tr>';
+      dropdown.innerHTML = '<option value="">-- No Active Companies --</option>';
+      return;
+    }
+
+    // Update Table
+    tableBody.innerHTML = companies.map(c => `
+      <tr>
+        <td>${c.companyId}</td>
+        <td>${c.name}</td>
+        <td class="${c.status === 'ACTIVE' ? 'status-active' : 'status-suspended'}">${c.status}</td>
+        <td>
+          <button style="width:auto; padding:5px 10px; background:${c.status === 'ACTIVE' ? '#ffc107' : '#28a745'};" 
+                  onclick="toggleCompany('${c.companyId}','${c.status}')">
+            ${c.status === "ACTIVE" ? "Suspend" : "Activate"}
+          </button>
+        </td>
+      </tr>
+    `).join("");
+
+    // Update Dropdown for Owner Creation
+    dropdown.innerHTML = companies
+      .filter(c => c.status === "ACTIVE")
+      .map(c => `<option value="${c.companyId}">${c.name} (${c.companyId})</option>`)
+      .join("");
+
+  } catch (err) {
+    document.getElementById("companyTable").innerHTML = '<tr><td colspan="4" style="text-align:center; color:red;">Failed to load companies.</td></tr>';
+  }
+}
+
+async function createCompany() {
+  const companyId = document.getElementById("companyIdInput").value.trim();
+  const name = document.getElementById("companyNameInput").value.trim();
+  const btn = document.getElementById("btnCreateCompany");
+
+  if (!companyId || !name) return alert("Please enter both ID and Name");
+
+  btn.disabled = true;
+  try {
+    await adminFetch("/admin/companies", "POST", { companyId, name });
+    alert("Company created successfully!");
+    
+    // Clear inputs
+    document.getElementById("companyIdInput").value = "";
+    document.getElementById("companyNameInput").value = "";
+    
+    await loadCompanies();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function toggleCompany(id, currentStatus) {
+  const action = currentStatus === "ACTIVE" ? "suspend" : "activate";
+  if (!confirm(`Are you sure you want to ${action} this company?`)) return;
+
+  try {
+    await adminFetch(`/admin/companies/${id}/${action}`, "POST");
+    await loadCompanies();
+  } catch (err) {
+    // Error handled by adminFetch
+  }
+}
+
+/* --- OWNER LOGIC --- */
+
+async function createOwner() {
+  const email = document.getElementById("ownerEmail").value.trim();
+  const password = document.getElementById("ownerPassword").value.trim();
+  const companyId = document.getElementById("ownerCompanySelect").value;
+  const btn = document.getElementById("btnCreateOwner");
+
+  if (!email || !password || !companyId) {
+    return alert("Please fill in all fields and select a company.");
+  }
+
+  btn.disabled = true;
+  try {
+    await adminFetch("/admin/users", "POST", { email, password, companyId });
+    alert("Owner user created successfully!");
+    
+    // Clear inputs
+    document.getElementById("ownerEmail").value = "";
+    document.getElementById("ownerPassword").value = "";
+    
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Initial Load
+loadCompanies();
+</script>
+
+</body>
+</html>

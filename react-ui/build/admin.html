@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f7f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .box {
+      background: white;
+      padding: 30px;
+      width: 350px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+    }
+    input, button {
+      width: 100%;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+
+<div class="box">
+  <h2>Admin Login</h2>
+  <input id="email" type="email" placeholder="Admin Email" />
+  <input id="password" type="password" placeholder="Admin Password" />
+  <button id="loginBtn" onclick="login()">Login</button>
+</div>
+
+<script>
+/* =========================================================
+   CONFIG
+========================================================= */
+const API_BASE =
+  "https://asia-south1-bussiness-control-platform.cloudfunctions.net/api";
+
+/* =========================================================
+   LOGIN
+========================================================= */
+async function login() {
+  const emailVal = email.value.trim();
+  const passwordVal = password.value.trim();
+
+  if (!emailVal || !passwordVal) {
+    alert("Please enter email and password");
+    return;
+  }
+
+  loginBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: emailVal,
+        password: passwordVal
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error("Invalid credentials");
+    }
+
+    const data = await res.json();
+
+    /* =====================================================
+       ADMIN FLAG (INTENTIONAL, YOUR DESIGN)
+    ===================================================== */
+    localStorage.setItem("IS_ADMIN", "true");
+    localStorage.setItem("ADMIN_EMAIL", data.email);
+
+    // Redirect
+    window.location.href = "admin-dashboard.html";
+
+  } catch (err) {
+    alert("Admin login failed");
+  } finally {
+    loginBtn.disabled = false;
+  }
+}
+</script>
+
+</body>
+</html>
