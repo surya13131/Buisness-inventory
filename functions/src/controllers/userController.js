@@ -51,7 +51,8 @@ async function userLogin(data) {
     },
     process.env.JWT_SECRET,
     {
-      expiresIn: "20s"
+      expiresIn: "8h"
+
 
     }
   );
@@ -61,7 +62,8 @@ async function userLogin(data) {
     token,
     role: user.role,
     companyId,
-    expiresIn: 20
+expiresIn: "8h"
+
   };
 }
 

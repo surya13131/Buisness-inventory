@@ -2,10 +2,6 @@ const { bucket } = require("../config/firebase");
 const { AppError } = require("./productController"); 
 const companyService = require("../services/companyService");
 
-/* =========================================================
-   1. ACCESS VALIDATION (The "Security Gate")
-========================================================= */
-
 async function validateCompanyAccess(companyId) {
     if (!companyId) throw new AppError(400, "Company ID is required.");
 
@@ -20,38 +16,76 @@ async function validateCompanyAccess(companyId) {
         throw new AppError(403, "Access Denied: Account suspended.");
     }
     
-    return company; // Return the company object for use if needed
+    return company; 
 }
 
 /* =========================================================
    2. PATHING & VALIDATION HELPERS
 ========================================================= */
 
+/**
+ * Generates the cloud storage file reference for a specific customer.
+ * Path: companies/{companyId}/customers/{customerId}.json
+ */
 const getCustomerFile = (companyId, customerId) =>
     bucket.file(`companies/${companyId}/customers/${customerId}.json`);
 
+/**
+ * Validates the GST format to ensure compliance with Indian tax regulations.
+ */
 function isValidGST(gst) {
     const pattern = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
     return pattern.test(gst.toUpperCase());
+}
+
+/**
+ * Validates the Phone Number (Indian 10-digit format).
+ */
+function isValidPhone(phone) {
+    const pattern = /^[6-9]\d{9}$/;
+    return pattern.test(phone);
+}
+
+/**
+ * Validates basic Email format.
+ */
+function isValidEmail(email) {
+    const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return pattern.test(email);
 }
 
 /* =========================================================
    3. CUSTOMER OPERATIONS
 ========================================================= */
 
+/**
+ * CREATE CUSTOMER: Registers a new billing profile for the business.
+ * Includes automatic GST, Phone, and Email validation and duplicate checking.
+ */
 async function createCustomer(companyId, data) {
     // 1. Verify company exists and is active
     await validateCompanyAccess(companyId);
 
     const { name, phone, email = "", address = "", gst } = data || {};
 
-    // 2. Data Validation
+    // 2. Data Validation (Required Fields)
     if (!name || !phone || !gst) {
         throw new AppError(400, "Missing required fields: Name, Phone, and GST.");
     }
 
+    // 2b. GST Format Check
     if (!isValidGST(gst)) {
-        throw new AppError(400, "Invalid GST Number format.");
+        throw new AppError(400, "Invalid GST Number format. Must be 15 characters (e.g., 22AAAAA0000A1Z5).");
+    }
+
+    // 2c. Phone Format Check
+    if (!isValidPhone(phone)) {
+        throw new AppError(400, "Invalid Phone Number. Please provide a 10-digit mobile number.");
+    }
+
+    // 2d. Email Format Check (Only if email is provided)
+    if (email && !isValidEmail(email)) {
+        throw new AppError(400, "Invalid Email Address format.");
     }
 
     const normalizedGST = gst.toUpperCase();
@@ -65,7 +99,7 @@ async function createCustomer(companyId, data) {
     const customerId = `CUST-${Date.now()}`;
 
     const customer = {
-        companyId,
+        companyId, // 🔒 Mandatory ownership stamp
         id: customerId,
         name,
         phone,
@@ -96,6 +130,9 @@ async function createCustomer(companyId, data) {
     }
 }
 
+/**
+ * GET ALL CUSTOMERS: Retrieves all billing profiles for the company.
+ */
 async function getAllCustomers(companyId) {
     // 🔒 Ensure the company is valid before fetching
     await validateCompanyAccess(companyId);
@@ -106,7 +143,6 @@ async function getAllCustomers(companyId) {
 
     if (files.length === 0) return [];
 
-  
     const customerPromises = files
         .filter(file => file.name.endsWith(".json"))
         .map(async (file) => {

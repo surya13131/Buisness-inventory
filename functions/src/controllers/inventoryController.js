@@ -68,7 +68,7 @@ async function recordMovement(
 
   // Rule: Ownership stamp must be included in every entry.
   history.push({
-    companyId, 
+    companyId,
     sku: product.sku,
     productName: product.name,
     type,
@@ -91,8 +91,13 @@ async function recordMovement(
 
 /**
  * STOCK IN: Adds stock and recalculates Average Cost (WAC) for THIS company.
+ * Updated: Handles "Rollbacks" (Cancellations) without distorting WAC.
  */
-async function stockIn(companyId, sku, { quantity, costPerUnit, note = "", date = null }) {
+async function stockIn(
+  companyId,
+  sku,
+  { quantity, costPerUnit, note = "", date = null }
+) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
   quantity = Number(quantity);
@@ -100,8 +105,17 @@ async function stockIn(companyId, sku, { quantity, costPerUnit, note = "", date 
 
   if (!quantity || quantity <= 0)
     throw new AppError(400, "Quantity must be greater than zero");
-  if (costPerUnit == null || costPerUnit < 0)
-    throw new AppError(400, "Cost per unit is required and cannot be negative");
+
+  // Rule: For standard "Stock In", cost is required.
+  // For "Rollbacks", allow fallback to current average cost.
+  if (costPerUnit == null || costPerUnit < 0) {
+    if (!note.toLowerCase().includes("rollback")) {
+      throw new AppError(
+        400,
+        "Cost per unit is required and cannot be negative"
+      );
+    }
+  }
 
   const product = await getProductBySku(companyId, sku);
 
@@ -109,14 +123,25 @@ async function stockIn(companyId, sku, { quantity, costPerUnit, note = "", date 
   const currentAvgCost = product.averageCost || 0;
 
   const newTotalQty = currentQty + quantity;
-  
-  // Logic: Weighted Average Cost formula applied per tenant.
-  const newAverageCost = parseFloat(
-    (
-      (currentQty * currentAvgCost + quantity * costPerUnit) /
-      newTotalQty
-    ).toFixed(2)
-  );
+
+  let newAverageCost;
+
+  // Rollback logic: DO NOT change average cost
+  if (
+    note.toLowerCase().includes("rollback") ||
+    note.toLowerCase().includes("cancel")
+  ) {
+    newAverageCost = currentAvgCost;
+  } else {
+    newAverageCost = parseFloat(
+      (
+        (currentQty * currentAvgCost + quantity * costPerUnit) /
+        newTotalQty
+      ).toFixed(2)
+    );
+  }
+
+  // ✅ Inventory value is ALWAYS stock × averageCost
   const newInventoryValue = parseFloat(
     (newTotalQty * newAverageCost).toFixed(2)
   );
@@ -129,8 +154,14 @@ async function stockIn(companyId, sku, { quantity, costPerUnit, note = "", date 
 
   await recordMovement(
     companyId,
-    { ...product, stockOnHand: newTotalQty, inventoryValue: newInventoryValue, averageCost: newAverageCost },
-    { type: "Stock In", quantity, costPerUnit, note, date }
+    updatedProduct,
+    {
+      type: "Stock In",
+      quantity,
+      costPerUnit: costPerUnit || currentAvgCost,
+      note,
+      date,
+    }
   );
 
   return updatedProduct;
@@ -154,6 +185,7 @@ async function stockOut(companyId, sku, { quantity, note = "", date = null }) {
     );
 
   const newQty = product.stockOnHand - quantity;
+
   const newInventoryValue = parseFloat(
     (newQty * (product.averageCost || 0)).toFixed(2)
   );
@@ -165,7 +197,7 @@ async function stockOut(companyId, sku, { quantity, note = "", date = null }) {
 
   await recordMovement(
     companyId,
-    { ...product, stockOnHand: newQty, inventoryValue: newInventoryValue },
+    updatedProduct,
     { type: "Stock Out", quantity, note, date }
   );
 
@@ -173,9 +205,13 @@ async function stockOut(companyId, sku, { quantity, note = "", date = null }) {
 }
 
 /**
- * STOCK ADJUSTMENT: Manual correction of stock levels scoped to companyId.
+ * STOCK ADJUSTMENT: Manual correction of stock levels.
  */
-async function stockAdjustment(companyId, sku, { quantity, note = "", date = null }) {
+async function stockAdjustment(
+  companyId,
+  sku,
+  { quantity, note = "", date = null }
+) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
   quantity = Number(quantity);
@@ -184,6 +220,7 @@ async function stockAdjustment(companyId, sku, { quantity, note = "", date = nul
 
   const product = await getProductBySku(companyId, sku);
   const newQty = product.stockOnHand + quantity;
+
   if (newQty < 0)
     throw new AppError(400, "Adjustment would make stock negative");
 
@@ -198,7 +235,7 @@ async function stockAdjustment(companyId, sku, { quantity, note = "", date = nul
 
   await recordMovement(
     companyId,
-    { ...product, stockOnHand: newQty, inventoryValue: newInventoryValue },
+    updatedProduct,
     { type: "Stock Adjustment", quantity, note, date }
   );
 
@@ -216,7 +253,6 @@ async function getAllMovements(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
   try {
-    // 🔒 Security: Prefix ensures we only look in THIS company's folder.
     const [files] = await bucket.getFiles({
       prefix: `companies/${companyId}/movements/`,
     });

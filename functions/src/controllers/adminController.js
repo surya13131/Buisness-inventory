@@ -21,9 +21,7 @@ async function adminLogin(data) {
   };
 }
 
-/* =========================================================
-   2. COMPANY MANAGEMENT
-========================================================= */
+
 async function createCompany(req) {
   const { companyId, name } = req.body || {};
 
@@ -65,9 +63,7 @@ async function activateCompany(companyId) {
   return companyService.updateCompanyStatus(companyId, "ACTIVE");
 }
 
-/* =========================================================
-   3. ADMIN → CREATE OWNER USER (NESTED STORAGE)
-========================================================= */
+
 async function createOwnerUser(req) {
   const { email, password, companyId } = req.body || {};
 

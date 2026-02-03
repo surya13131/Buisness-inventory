@@ -6,6 +6,7 @@ const customerController = require("./controllers/customerController");
 const invoiceController = require("./controllers/invoiceController");
 const adminController = require("./controllers/adminController");
 const userController = require("./controllers/userController");
+const reportController = require("./controllers/reportController"); 
 
 const { requireAdmin } = require("./middleware/requireAdmin");
 const { requireAuth } = require("./middleware/requireAuth");
@@ -165,21 +166,26 @@ const apiHandler = (req, res) => {
           }
 
           /* ---------- PRODUCTS ---------- */
-          if (path === "/products") {
-            if (method === "GET") {
-              return res.json(
-                await productController.getAllProducts(req.companyId)
-              );
-            }
-            if (method === "POST") {
-              return res.status(201).json(
-                await productController.createProduct(
-                  req.companyId,
-                  req.body
-                )
-              );
-            }
-          }
+      if (path === "/products") {
+  if (method === "GET") {
+    return res.json(
+      await productController.getAllProducts(req.companyId)
+    );
+  }
+
+  if (method === "POST") {
+    try {
+      const result = await productController.createProduct(
+        req.companyId,
+        req.body
+      );
+      return res.status(201).json(result);
+    } catch (err) {
+      return errorHandler(err, res);
+    }
+  }
+}
+
 
           if (segments[0] === "products" && segments.length === 2) {
             const sku = segments[1];
@@ -196,54 +202,72 @@ const apiHandler = (req, res) => {
             }
           }
 
-          /* ---------- CUSTOMERS (MODIFIED) ---------- */
-          if (path === "/customers") {
-            if (method === "GET") {
-              // Now passes companyId so owner only sees THEIR customers
-              return res.json(
-                await customerController.getAllCustomers(req.companyId)
-              );
-            }
-            if (method === "POST") {
-              // Now passes companyId so customer is saved to owner's folder
-              return res.status(201).json(
-                await customerController.createCustomer(
-                  req.companyId,
-                  req.body
-                )
-              );
-            }
-          }
+     if (path === "/customers") {
+  if (method === "GET") {
+    return res.json(
+      await customerController.getAllCustomers(req.companyId)
+    );
+  }
+
+  if (method === "POST") {
+    try {
+      const result = await customerController.createCustomer(
+        req.companyId,
+        req.body
+      );
+      return res.status(201).json(result);
+    } catch (err) {
+      return errorHandler(err, res);
+    }
+  }
+}
+
 
           /* ---------- INVOICES ---------- */
-          if (path === "/invoices") {
-            if (method === "GET") {
-              return res.json(
-                await invoiceController.getAllInvoices(req.companyId)
+          // Specific Resource Routes first (Cancel & Payment)
+          if (segments[0] === "invoices" && segments.length === 3) {
+            const invoiceNumber = segments[1];
+            const action = segments[2];
+
+            if (action === "cancel" && method === "POST") {
+              return res.status(200).json(
+                await invoiceController.cancelInvoice(req.companyId, invoiceNumber)
               );
             }
-            if (method === "POST") {
+
+            if (action === "payments" && method === "POST") {
               return res.status(201).json(
-                await invoiceController.createInvoice(
-                  req.companyId,
-                  req.body
-                )
+                await invoiceController.recordPayment(req.companyId, invoiceNumber, req.body)
               );
             }
           }
 
-          if (
-            segments[0] === "invoices" &&
-            segments.length === 3 &&
-            segments[2] === "payments" &&
-            method === "POST"
-          ) {
-            return res.status(201).json(
-              await invoiceController.recordPayment(
-                req.companyId,
-                segments[1],
-                req.body
-              )
+    // Collection Routes
+if (path === "/invoices") {
+  if (method === "GET") {
+    return res.json(
+      await invoiceController.getAllInvoices(req.companyId)
+    );
+  }
+
+  if (method === "POST") {
+    try {
+      const result = await invoiceController.createInvoice(
+        req.companyId,
+        req.body
+      );
+      return res.status(201).json(result);
+    } catch (err) {
+      return errorHandler(err, res);
+    }
+  }
+}
+
+
+          /* ---------- REPORTS ---------- */
+          if (path === "/reports/export" && method === "GET") {
+            return res.json(
+              await reportController.getExportData(req.companyId)
             );
           }
 
@@ -295,6 +319,7 @@ const apiHandler = (req, res) => {
     } catch (err) {
       console.error("API ERROR 🛑");
       console.error(err.stack);
+      // Ensure we use the custom errorHandler to return JSON instead of plain text
       return errorHandler(err, res);
     }
   });

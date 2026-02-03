@@ -1,95 +1,114 @@
+/**
+ * GLOBAL ERROR HANDLER
+ * Ensures all errors (Validation, Firebase, or System) return a JSON response.
+ */
 function handleError(err, res) {
   const timestamp = new Date().toISOString();
 
-  // ✅ Plain Node-safe request info
+  // Extract request info safely for logging
   const req = res.req || {};
   const method = req.method || "N/A";
   const path = req.url || "N/A";
 
+  // 1. Console Log for Developer Debugging
   console.error(`
 ========== ❌ INVENTORY SYSTEM ERROR ==========
 Timestamp: ${timestamp}
 Action:    ${method} ${path}
-Error Type: ${err.name || "SystemError"}
-Message:    ${err.message}
-Code:       ${err.code || "N/A"}
+Message:   ${err.message || "No message provided"}
+Status:    ${err.statusCode || 500}
+Code:      ${err.code || "N/A"}
 ================================================
   `);
 
-  // ✅ If headers already sent, fail safely
+  // 2. Safety Gate: If headers were already sent, just close the connection
   if (res.headersSent) {
-    try { res.end(); } catch {}
+    console.warn("⚠️ Headers already sent. Cannot send JSON error payload.");
+    try { res.end(); } catch (e) {}
     return;
   }
 
-  /* =========================
-     DEFAULT RESPONSE VALUES
-  ========================= */
+  /* =========================================================
+     DEFAULT VALUES (If no specific mapping is found)
+  ========================================================= */
   let status = 500;
-  let businessReason =
-    "An internal system error occurred. Please try again later.";
-  let uiMessage = "System Failure";
+  let businessReason = "An internal system error occurred. Please try again.";
+  let uiTitle = "System Error";
 
-  /* =========================
-     ERROR CODE MAPPING
-  ========================= */
+  /* =========================================================
+     ERROR CODE MAPPING (Firebase / Storage / Logic)
+  ========================================================= */
   const errorMapping = {
     "storage/object-not-found": {
       status: 404,
-      msg: "Product Not Found",
-      why: "The requested resource does not exist."
+      title: "Not Found",
+      reason: "The requested resource does not exist."
     },
     "already-exists": {
       status: 409,
-      msg: "Duplicate Entry",
-      why: "A resource with this identifier already exists."
+      title: "Duplicate Entry",
+      reason: "A record with this information already exists."
     },
     "permission-denied": {
       status: 403,
-      msg: "Access Denied",
-      why: "The system does not have permission to perform this action."
+      title: "Access Denied",
+      reason: "You do not have permission to perform this action."
     },
     "invalid-argument": {
       status: 400,
-      msg: "Invalid Data",
-      why: "The data provided is not in the expected format."
+      title: "Validation Error",
+      reason: "The data provided is incorrectly formatted."
     }
   };
 
-  /* =========================
-     BUSINESS / APP ERRORS
-  ========================= */
+  /* =========================================================
+     LOGIC: PRIORITIZE CUSTOM APP ERRORS
+  ========================================================= */
+  
+  // A. Check for AppError (errors thrown manually with statusCode)
   if (err.statusCode) {
     status = err.statusCode;
-    uiMessage = "Validation Error";
+    uiTitle = status === 400 ? "Validation Failed" : "Request Error";
     businessReason = err.message;
-  }
-  /* =========================
-     SYSTEM / FIREBASE ERRORS
-  ========================= */
+  } 
+  // B. Check for System/Firebase error codes
   else if (err.code && errorMapping[err.code]) {
     status = errorMapping[err.code].status;
-    uiMessage = errorMapping[err.code].msg;
-    businessReason = errorMapping[err.code].why;
+    uiTitle = errorMapping[err.code].title;
+    businessReason = errorMapping[err.code].reason;
+  }
+  // C. Fallback for generic JavaScript errors
+  else if (err.message) {
+    businessReason = err.message;
   }
 
-  /* =========================
-     FINAL RESPONSE (PLAIN NODE)
-  ========================= */
+  /* =========================================================
+     FINAL PAYLOAD CONSTRUCTION (Strict JSON)
+  ========================================================= */
+  
   const payload = JSON.stringify({
     success: false,
+    message: businessReason, 
     error: {
-      title: uiMessage,
-      message: businessReason,
-      technical_details: err.message,
-      path,
-      timestamp
+      title: uiTitle,
+      technical_details: err.message || "N/A",
+      path: path,
+      timestamp: timestamp
     }
   });
 
+  // 3. Send Response with correct JSON headers
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Length", Buffer.byteLength(payload));
+
+  // 🔒 SAFETY WRAP (Cloud Run compatible)
+  try {
+    res.setHeader("Content-Length", Buffer.byteLength(payload));
+  } catch (lengthError) {
+    console.warn("⚠️ Failed to set Content-Length safely:", lengthError.message);
+  }
+  
+  // Final exit
   res.end(payload);
 }
 

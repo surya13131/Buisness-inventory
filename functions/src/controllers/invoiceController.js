@@ -1,8 +1,8 @@
 const { bucket } = require("../config/firebase");
 const { getProductBySku } = require("./productController");
-const { stockOut } = require("./inventoryController");
+const { stockOut, stockIn } = require("./inventoryController"); // Added stockIn for rollback
 const { AppError } = require("./productController");
-const companyService = require("../services/companyService"); 
+const companyService = require("../services/companyService");
 
 /* =========================================================
     1. ACCESS VALIDATION (The Security Gate)
@@ -15,13 +15,11 @@ const companyService = require("../services/companyService");
 async function validateCompanyAccess(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
-  // Uses the standardized getCompanyById to prevent 500 naming errors
   const company = await companyService.getCompanyById(companyId);
   if (!company) {
     throw new AppError(404, "Company not found");
   }
 
-  // Multi-tenant rule: Block suspended businesses from making sales
   if (company.status !== "ACTIVE") {
     throw new AppError(403, "Access Denied: Your company account is currently suspended.");
   }
@@ -43,7 +41,6 @@ const getInvoiceFile = (companyId, id) =>
 
 /**
  * CREATE INVOICE: Handles stock deduction and profit calculation.
- * 🔒 Stamped with companyId to ensure data isolation.
  */
 async function createInvoice(companyId, data) {
   await validateCompanyAccess(companyId);
@@ -59,7 +56,6 @@ async function createInvoice(companyId, data) {
     const product = await getProductBySku(companyId, item.sku);
     if (!product) throw new AppError(404, `Product ${item.sku} not found`);
 
-    // Guard: Prevent selling more than what is in stock
     if (product.stockOnHand < item.quantity) {
       throw new AppError(
         400,
@@ -68,7 +64,7 @@ async function createInvoice(companyId, data) {
     }
 
     const sellingPrice = Number(product.sellingPrice);
-    const costPrice = Number(product.costPrice); 
+    const costPrice = Number(product.costPrice);
 
     invoiceTotal += item.quantity * sellingPrice;
     totalCostOfGoods += item.quantity * costPrice;
@@ -78,14 +74,13 @@ async function createInvoice(companyId, data) {
       name: product.name,
       quantity: item.quantity,
       sellingPrice,
+      costPrice, // 💡 Storing costPrice here is vital for accurate stock rollback later
       lineTotal: item.quantity * sellingPrice,
     });
   }
 
-  // Profit Calculation: $grossProfit = \text{invoiceTotal} - \text{totalCostOfGoods}$
   const grossProfit = invoiceTotal - totalCostOfGoods;
 
-  // 🔒 Deduct stock: Strictly scoped to the same companyId
   for (const item of finalItems) {
     await stockOut(companyId, item.sku, {
       quantity: item.quantity,
@@ -96,7 +91,7 @@ async function createInvoice(companyId, data) {
   const now = new Date().toISOString();
 
   const invoice = {
-    companyId, // 🔒 Ownership stamp mandatory for multi-tenant isolation
+    companyId,
     invoiceNumber: invId,
     customerName: customer.name,
     gst: customer.gst,
@@ -105,20 +100,52 @@ async function createInvoice(companyId, data) {
     paidOn: status === "Paid" ? now : null,
     items: finalItems,
     totalAmount: Number(invoiceTotal.toFixed(2)),
-    outstandingAmount:
-      status === "Paid" ? 0 : Number(invoiceTotal.toFixed(2)),
+    outstandingAmount: status === "Paid" ? 0 : Number(invoiceTotal.toFixed(2)),
     grossProfit: Number(grossProfit.toFixed(2)),
     status: status === "Paid" ? "Paid" : "Unpaid",
   };
 
-  await getInvoiceFile(companyId, invId).save(JSON.stringify(invoice));
+  await getInvoiceFile(companyId, invId).save(JSON.stringify(invoice, null, 2));
   return invoice;
 }
 
-/**
- * DASHBOARD SUMMARY: Calculates KPIs for the current month.
- * 🔒 Only aggregates invoices for the specific companyId.
- */
+
+async function cancelInvoice(companyId, invoiceNumber) {
+  await validateCompanyAccess(companyId);
+
+  const file = getInvoiceFile(companyId, invoiceNumber);
+  const [exists] = await file.exists();
+
+  if (!exists) throw new AppError(404, "Invoice not found");
+
+  const [content] = await file.download();
+  const invoice = JSON.parse(content.toString());
+
+  if (invoice.status === "Cancelled") {
+    throw new AppError(400, "Invoice is already cancelled.");
+  }
+
+  // 1. Stock Rollback: Return each item to stock
+  for (const item of invoice.items) {
+    await stockIn(companyId, item.sku, {
+      quantity: item.quantity,
+      costPerUnit: item.costPrice, // Return at the recorded cost price
+      note: `Rollback: Cancelled ${invoiceNumber}`,
+    });
+  }
+
+  // 2. Financial Reset & Status Update
+  invoice.status = "Cancelled";
+  invoice.totalAmount = 0; 
+  invoice.outstandingAmount = 0; 
+  invoice.grossProfit = 0; 
+  invoice.cancelledAt = new Date().toISOString();
+
+  await file.save(JSON.stringify(invoice, null, 2));
+  return { success: true, message: "Invoice cancelled and stock returned.", invoice };
+}
+
+
 async function getDashboardSummary(companyId) {
   await validateCompanyAccess(companyId);
 
@@ -133,14 +160,15 @@ async function getDashboardSummary(companyId) {
   };
 
   invoices.forEach((inv) => {
+
+    if (inv.status === "Cancelled") return;
+
     const invDate = new Date(inv.date);
 
-    // Only count outstanding amounts for non-cancelled invoices
-    if (inv.status !== "Cancelled") {
-      summary.totalOutstanding += inv.outstandingAmount || 0;
-    }
+   
+    summary.totalOutstanding += inv.outstandingAmount || 0;
 
-    // Current Month Filtering Logic
+
     if (
       invDate.getMonth() === now.getMonth() &&
       invDate.getFullYear() === now.getFullYear()
@@ -155,17 +183,17 @@ async function getDashboardSummary(companyId) {
     }
   });
 
+  summary.monthlySales = Number(summary.monthlySales.toFixed(2));
+  summary.monthlyProfit = Number(summary.monthlyProfit.toFixed(2));
+  summary.totalOutstanding = Number(summary.totalOutstanding.toFixed(2));
+
   return summary;
 }
 
-/**
- * GET ALL INVOICES: Lists all documents in the company's invoice folder.
- *
- */
+
 async function getAllInvoices(companyId) {
   await validateCompanyAccess(companyId);
 
-  // Prefix ensures the server never "leaks" data between companies
   const [files] = await bucket.getFiles({
     prefix: `companies/${companyId}/invoices/`,
   });
@@ -186,9 +214,7 @@ async function getAllInvoices(companyId) {
   );
 }
 
-/**
- * RECORD PAYMENT: Updates outstanding balance for a specific invoice.
- */
+
 async function recordPayment(companyId, invoiceNumber, paymentData) {
   await validateCompanyAccess(companyId);
 
@@ -200,11 +226,15 @@ async function recordPayment(companyId, invoiceNumber, paymentData) {
   const [content] = await file.download();
   const invoice = JSON.parse(content.toString());
 
+
+  if (invoice.status === "Cancelled") {
+    throw new AppError(400, "Cannot record payment for a cancelled invoice.");
+  }
+
   const amountReceived = Number(paymentData.amountReceived);
   if (amountReceived <= 0)
     throw new AppError(400, "Invalid payment amount");
 
-  // Prevent overpayment to keep financial records accurate
   if (amountReceived > invoice.outstandingAmount)
     throw new AppError(400, "Overpayment not allowed");
 
@@ -212,18 +242,18 @@ async function recordPayment(companyId, invoiceNumber, paymentData) {
     (invoice.outstandingAmount - amountReceived).toFixed(2)
   );
 
-  // Auto-status update once balance reaches zero
   if (invoice.outstandingAmount === 0) {
     invoice.status = "Paid";
     invoice.paidOn = new Date().toISOString();
   }
 
-  await file.save(JSON.stringify(invoice));
+  await file.save(JSON.stringify(invoice, null, 2));
   return invoice;
 }
 
 module.exports = {
   createInvoice,
+  cancelInvoice, 
   getAllInvoices,
   getDashboardSummary,
   recordPayment,

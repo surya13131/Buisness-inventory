@@ -22,25 +22,40 @@ const getTimestamp = () => new Date().toISOString();
 async function validateCompanyAccess(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
-  // Logic: Uses the standardized getCompanyById to prevent 500 errors
   const company = await getCompanyById(companyId);
   if (!company) {
     throw new AppError(404, "Company not found");
   }
 
-  // Multi-tenant rule: Revoke access instantly if status is not ACTIVE
   if (company.status !== "ACTIVE") {
-    throw new AppError(403, "Access Denied: Your company account is currently suspended.");
+    throw new AppError(
+      403,
+      "Access Denied: Your company account is currently suspended."
+    );
   }
+}
+
+/* =========================================================
+    🔔 LOW STOCK HELPER
+========================================================= */
+
+function getLowStockInfo(product) {
+  const isLowStock =
+    product.reorderLevel > 0 &&
+    product.stockOnHand <= product.reorderLevel;
+
+  return {
+    isLowStock,
+    lowStockMessage: isLowStock
+      ? `Low stock: only ${product.stockOnHand} left (reorder level ${product.reorderLevel})`
+      : null,
+  };
 }
 
 /* =========================================================
     2. PATH HELPERS (Multi-Tenant Scoping)
 ========================================================= */
 
-/** * Rule: Product files are stored in a private folder for each company.
- * Path: companies/{companyId}/products/{sku}.json
- */
 const getProductFile = (companyId, sku) =>
   bucket.file(`companies/${companyId}/products/${sku}.json`);
 
@@ -48,87 +63,90 @@ const getProductFile = (companyId, sku) =>
     3. PRODUCT OPERATIONS (Company-Scoped)
 ========================================================= */
 
-/**
- * CREATE PRODUCT: Scoped to the tenant company.
- */
-async function createProduct(companyId, {
-  sku,
-  name,
-  category = "",
-  costPrice,
-  sellingPrice = 0,
-  reorderLevel = 0,
-}) {
+async function createProduct(
+  companyId,
+  { sku, name, category = "", costPrice, sellingPrice = 0, reorderLevel = 0 }
+) {
   await validateCompanyAccess(companyId);
 
   if (!name || costPrice == null)
     throw new AppError(400, "Name and cost price are required");
 
-  costPrice = Number(costPrice);
-  sellingPrice = Number(sellingPrice);
-  reorderLevel = Number(reorderLevel);
+  const finalCostPrice = Number(parseFloat(costPrice).toFixed(2));
+  const finalSellingPrice = Number(parseFloat(sellingPrice).toFixed(2));
+  const finalReorderLevel = Number(parseInt(reorderLevel) || 0);
 
-  if (costPrice < 0) throw new AppError(400, "Cost price cannot be negative");
-  if (sellingPrice < 0) throw new AppError(400, "Selling price cannot be negative");
-  if (reorderLevel < 0) throw new AppError(400, "Reorder level cannot be negative");
+  if (finalCostPrice < 0)
+    throw new AppError(400, "Cost price cannot be negative");
+  if (finalSellingPrice < 0)
+    throw new AppError(400, "Selling price cannot be negative");
+  if (finalReorderLevel < 0)
+    throw new AppError(400, "Reorder level cannot be negative");
 
   const finalSku = sku ? String(sku) : `SKU${Date.now()}`;
   const file = getProductFile(companyId, finalSku);
 
-  // Check existence ONLY within this company's products
   const [exists] = await file.exists();
   if (exists)
-    throw new AppError(409, "Product SKU already exists in your company catalog");
+    throw new AppError(
+      409,
+      "Product SKU already exists in your company catalog"
+    );
 
   const product = {
-    companyId, // 🔒 Mandatory ownership stamp
+    companyId,
     sku: finalSku,
     name,
     category,
-    costPrice,
-    sellingPrice,
-    reorderLevel,
+    costPrice: finalCostPrice,
+    sellingPrice: finalSellingPrice,
+    reorderLevel: finalReorderLevel,
     stockOnHand: 0,
-    averageCost: costPrice,
+    averageCost: finalCostPrice,
     inventoryValue: 0,
     createdAt: getTimestamp(),
     updatedAt: getTimestamp(),
   };
 
-  await file.save(JSON.stringify(product));
+  await file.save(JSON.stringify(product, null, 2));
   return product;
 }
 
 /**
- * GET ALL PRODUCTS: Returns the catalog for a single company.
+ * GET ALL PRODUCTS
  */
 async function getAllProducts(companyId) {
   await validateCompanyAccess(companyId);
 
-  // Prefix ensures the server never "leaks" data between companies
   const [files] = await bucket.getFiles({
     prefix: `companies/${companyId}/products/`,
   });
 
-  const products = [];
+  const productPromises = files
+    .filter((file) => file.name.endsWith(".json"))
+    .map(async (file) => {
+      try {
+        const [contents] = await file.download();
+        const product = JSON.parse(contents.toString());
+        return {
+          ...product,
+          ...getLowStockInfo(product),
+        };
+      } catch (err) {
+        console.error(`Failed to parse ${file.name}:`, err.message);
+        return null;
+      }
+    });
 
-  for (const file of files) {
-    try {
-      const [contents] = await file.download();
-      const product = JSON.parse(contents.toString());
-      products.push(product);
-    } catch (err) {
-      console.error(`Failed to read/parse ${file.name}:`, err.message);
-    }
-  }
+  const products = await Promise.all(productPromises);
 
-  return products.sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-  );
+  return products
+    .filter((p) => p !== null)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 /**
- * GET PRODUCT BY SKU: Internal/External lookup for a specific tenant's product.
+ * GET PRODUCT BY SKU
  */
 async function getProductBySku(companyId, sku) {
   await validateCompanyAccess(companyId);
@@ -140,14 +158,18 @@ async function getProductBySku(companyId, sku) {
 
   try {
     const [contents] = await file.download();
-    return JSON.parse(contents.toString());
+    const product = JSON.parse(contents.toString());
+    return {
+      ...product,
+      ...getLowStockInfo(product),
+    };
   } catch {
     throw new AppError(500, `Failed to read product data for SKU ${sku}`);
   }
 }
 
 /**
- * GET PRODUCT BY NAME: Utility search for the company dashboard.
+ * GET PRODUCT BY NAME
  */
 async function getProductByName(companyId, name) {
   await validateCompanyAccess(companyId);
@@ -162,19 +184,28 @@ async function getProductByName(companyId, name) {
 }
 
 /**
- * UPDATE PRODUCT: Modifies product details while preserving company isolation.
+ * UPDATE PRODUCT
  */
 async function updateProduct(companyId, sku, updates) {
   await validateCompanyAccess(companyId);
 
   const product = await getProductBySku(companyId, sku);
 
-  if (updates.costPrice != null && Number(updates.costPrice) < 0)
-    throw new AppError(400, "Cost price cannot be negative");
-  if (updates.sellingPrice != null && Number(updates.sellingPrice) < 0)
-    throw new AppError(400, "Selling price cannot be negative");
-  if (updates.reorderLevel != null && Number(updates.reorderLevel) < 0)
-    throw new AppError(400, "Reorder level cannot be negative");
+  if (updates.costPrice != null)
+    updates.costPrice = Number(parseFloat(updates.costPrice).toFixed(2));
+  if (updates.sellingPrice != null)
+    updates.sellingPrice = Number(
+      parseFloat(updates.sellingPrice).toFixed(2)
+    );
+  if (updates.averageCost != null)
+    updates.averageCost = Number(
+      parseFloat(updates.averageCost).toFixed(2)
+    );
+  if (updates.stockOnHand != null)
+    updates.stockOnHand = Number(parseInt(updates.stockOnHand));
+
+  if (updates.costPrice < 0 || updates.sellingPrice < 0)
+    throw new AppError(400, "Price fields cannot be negative");
 
   const updatedProduct = {
     ...product,
@@ -182,12 +213,18 @@ async function updateProduct(companyId, sku, updates) {
     updatedAt: getTimestamp(),
   };
 
-  await getProductFile(companyId, sku).save(JSON.stringify(updatedProduct));
+  updatedProduct.inventoryValue = Number(
+    (updatedProduct.stockOnHand * updatedProduct.averageCost).toFixed(2)
+  );
+
+  await getProductFile(companyId, sku).save(
+    JSON.stringify(updatedProduct, null, 2)
+  );
   return updatedProduct;
 }
 
 /**
- * DELETE PRODUCT: Permanently removes a product from the company folder.
+ * DELETE PRODUCT
  */
 async function deleteProduct(companyId, sku) {
   await validateCompanyAccess(companyId);
