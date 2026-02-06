@@ -2,21 +2,14 @@ const { getAllInvoices } = require("./invoiceController");
 const { getAllProducts } = require("./productController");
 const { AppError } = require("./productController");
 
-/**
- * EXCEL DATA PREP: Prepares clean, accurate datasets for exports.
- * Rules applied for end-of-day correctness:
- * 1. Exclude 'Cancelled' invoices to match Dashboard Sales.
- * 2. Ensure consistency in date formatting (en-IN).
- * 3. Strict numeric precision for currency values.
- */
+
 async function getExportData(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
   const invoices = await getAllInvoices(companyId);
   const products = await getAllProducts(companyId);
 
-  // 1. Filtered Sales (Only Active/Paid)
-  // RULE: Dashboard = reports = raw data
+
   const salesReport = invoices
     .filter(inv => inv.status !== "Cancelled")
     .map(inv => ({
@@ -29,8 +22,6 @@ async function getExportData(companyId) {
       "Outstanding": Number((inv.outstandingAmount || 0).toFixed(2))
     }));
 
-  // 2. Inventory Valuation Report
-  // RULE: Asset values must match the sum of movements
   const inventoryReport = products.map(p => ({
     "SKU": p.sku,
     "Product Name": p.name,

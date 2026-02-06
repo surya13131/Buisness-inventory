@@ -1,17 +1,12 @@
-const { bucket } = require("../config/firebase");
+const { getBucket } = require("../config/firebase");
 const { getProductBySku } = require("./productController");
-const { stockOut, stockIn } = require("./inventoryController"); // Added stockIn for rollback
+const { stockOut, stockIn } = require("./inventoryController");
 const { AppError } = require("./productController");
 const companyService = require("../services/companyService");
 
-/* =========================================================
-    1. ACCESS VALIDATION (The Security Gate)
-========================================================= */
+// Initialize bucket instance
+const bucket = getBucket();
 
-/**
- * Validates that the company exists and is ACTIVE.
- * Suspended companies are blocked from all financial operations.
- */
 async function validateCompanyAccess(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
@@ -25,23 +20,10 @@ async function validateCompanyAccess(companyId) {
   }
 }
 
-/* =========================================================
-    2. PATH HELPERS (Multi-Tenant Scoping)
-========================================================= */
-
-/** * Rule: Invoices are stored in a private folder for each company
- * Path: companies/{companyId}/invoices/{id}.json
- */
 const getInvoiceFile = (companyId, id) =>
   bucket.file(`companies/${companyId}/invoices/${id}.json`);
 
-/* =========================================================
-    3. INVOICE OPERATIONS
-========================================================= */
 
-/**
- * CREATE INVOICE: Handles stock deduction and profit calculation.
- */
 async function createInvoice(companyId, data) {
   await validateCompanyAccess(companyId);
 
@@ -74,7 +56,7 @@ async function createInvoice(companyId, data) {
       name: product.name,
       quantity: item.quantity,
       sellingPrice,
-      costPrice, // 💡 Storing costPrice here is vital for accurate stock rollback later
+      costPrice, 
       lineTotal: item.quantity * sellingPrice,
     });
   }
@@ -165,7 +147,7 @@ async function getDashboardSummary(companyId) {
 
     const invDate = new Date(inv.date);
 
-   
+    
     summary.totalOutstanding += inv.outstandingAmount || 0;
 
 
@@ -213,7 +195,6 @@ async function getAllInvoices(companyId) {
     (a, b) => new Date(b.date) - new Date(a.date)
   );
 }
-
 
 async function recordPayment(companyId, invoiceNumber, paymentData) {
   await validateCompanyAccess(companyId);

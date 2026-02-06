@@ -1,9 +1,4 @@
-/**
- * Middleware: requireAdmin
- * Rule:
- * - Admin UI requests only
- * - No sessions, no tokens
- */
+
 function requireAdmin(req, res, next) {
   const adminHeader = req.headers["x-admin"];
 

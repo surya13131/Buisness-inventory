@@ -1,6 +1,9 @@
-const { bucket } = require("../config/firebase");
+const { getBucket } = require("../config/firebase");
 const { AppError } = require("./productController"); 
 const companyService = require("../services/companyService");
+
+// Initialize bucket by calling the function
+const bucket = getBucket();
 
 async function validateCompanyAccess(companyId) {
     if (!companyId) throw new AppError(400, "Company ID is required.");
@@ -19,49 +22,24 @@ async function validateCompanyAccess(companyId) {
     return company; 
 }
 
-/* =========================================================
-   2. PATHING & VALIDATION HELPERS
-========================================================= */
-
-/**
- * Generates the cloud storage file reference for a specific customer.
- * Path: companies/{companyId}/customers/{customerId}.json
- */
 const getCustomerFile = (companyId, customerId) =>
     bucket.file(`companies/${companyId}/customers/${customerId}.json`);
 
-/**
- * Validates the GST format to ensure compliance with Indian tax regulations.
- */
 function isValidGST(gst) {
     const pattern = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
     return pattern.test(gst.toUpperCase());
 }
 
-/**
- * Validates the Phone Number (Indian 10-digit format).
- */
 function isValidPhone(phone) {
     const pattern = /^[6-9]\d{9}$/;
     return pattern.test(phone);
 }
 
-/**
- * Validates basic Email format.
- */
 function isValidEmail(email) {
     const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return pattern.test(email);
 }
 
-/* =========================================================
-   3. CUSTOMER OPERATIONS
-========================================================= */
-
-/**
- * CREATE CUSTOMER: Registers a new billing profile for the business.
- * Includes automatic GST, Phone, and Email validation and duplicate checking.
- */
 async function createCustomer(companyId, data) {
     // 1. Verify company exists and is active
     await validateCompanyAccess(companyId);

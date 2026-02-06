@@ -1,24 +1,20 @@
-const { bucket } = require("../config/firebase");
+const { getBucket } = require("../config/firebase");
 const { getCompanyById } = require("../services/companyService");
 
-/* =========================================================
-    1. ERROR HANDLING & UTILS
-========================================================= */
+// Initialize bucket instance
+const bucket = getBucket();
 
 class AppError extends Error {
   constructor(statusCode, message) {
     super(message);
     this.statusCode = statusCode;
-    Error.captureStackTrace(this, this.constructor);
+    this.Error.captureStackTrace(this, this.constructor);
   }
 }
 
 const getTimestamp = () => new Date().toISOString();
 
-/**
- * 🔒 SECURITY GATE: Ensures the company is ACTIVE.
- * Suspended companies cannot view, create, or edit products.
- */
+
 async function validateCompanyAccess(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
@@ -35,10 +31,6 @@ async function validateCompanyAccess(companyId) {
   }
 }
 
-/* =========================================================
-    🔔 LOW STOCK HELPER
-========================================================= */
-
 function getLowStockInfo(product) {
   const isLowStock =
     product.reorderLevel > 0 &&
@@ -52,16 +44,9 @@ function getLowStockInfo(product) {
   };
 }
 
-/* =========================================================
-    2. PATH HELPERS (Multi-Tenant Scoping)
-========================================================= */
-
 const getProductFile = (companyId, sku) =>
   bucket.file(`companies/${companyId}/products/${sku}.json`);
 
-/* =========================================================
-    3. PRODUCT OPERATIONS (Company-Scoped)
-========================================================= */
 
 async function createProduct(
   companyId,
@@ -112,9 +97,7 @@ async function createProduct(
   return product;
 }
 
-/**
- * GET ALL PRODUCTS
- */
+
 async function getAllProducts(companyId) {
   await validateCompanyAccess(companyId);
 
@@ -145,9 +128,7 @@ async function getAllProducts(companyId) {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
-/**
- * GET PRODUCT BY SKU
- */
+
 async function getProductBySku(companyId, sku) {
   await validateCompanyAccess(companyId);
 
@@ -168,9 +149,6 @@ async function getProductBySku(companyId, sku) {
   }
 }
 
-/**
- * GET PRODUCT BY NAME
- */
 async function getProductByName(companyId, name) {
   await validateCompanyAccess(companyId);
 
@@ -183,9 +161,7 @@ async function getProductByName(companyId, name) {
   return product;
 }
 
-/**
- * UPDATE PRODUCT
- */
+
 async function updateProduct(companyId, sku, updates) {
   await validateCompanyAccess(companyId);
 
@@ -223,9 +199,7 @@ async function updateProduct(companyId, sku, updates) {
   return updatedProduct;
 }
 
-/**
- * DELETE PRODUCT
- */
+
 async function deleteProduct(companyId, sku) {
   await validateCompanyAccess(companyId);
 

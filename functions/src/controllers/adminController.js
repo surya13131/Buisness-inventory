@@ -1,7 +1,9 @@
 const companyService = require("../services/companyService");
 const adminAuth = require("../services/adminAuthService");
-const { bucket } = require("../config/firebase");
+const { getBucket } = require("../config/firebase");
 
+// Initialize bucket instance
+const bucket = getBucket();
 
 async function adminLogin(data) {
   const { email, password } = data || {};

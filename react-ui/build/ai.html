@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Insight - Business Intelligence</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        :root {
+            --sidebar-bg: #0f172a; --chat-bg: #ffffff;
+            --accent: #6366f1; --text-main: #1e293b;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; background: #f8fafc; }
+
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--sidebar-bg); color: white; display: flex; flex-direction: column; border-right: 1px solid #1e293b; flex-shrink: 0; }
+        .sidebar-header { padding: 20px; font-weight: bold; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; }
+        .history-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .history-item { padding: 12px; margin-bottom: 5px; border-radius: 8px; cursor: pointer; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: 0.2s; color: #94a3b8; }
+        .history-item:hover { background: #1e293b; color: white; }
+        .history-item i { margin-right: 10px; }
+
+        /* Main Chat Area */
+        .main-content { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .top-nav { padding: 15px 25px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        
+        .chat-window { flex: 1; overflow-y: auto; padding: 40px 15%; display: flex; flex-direction: column; gap: 20px; scroll-behavior: smooth; }
+        .empty-state { text-align: center; margin-top: 15vh; }
+        .empty-state h1 { font-size: 2.2rem; color: var(--text-main); margin-bottom: 10px; }
+
+        /* Messages */
+        .message { max-width: 90%; padding: 15px 25px; border-radius: 12px; line-height: 1.6; font-size: 15px; word-wrap: break-word; }
+        .user-msg { align-self: flex-end; background: #f1f5f9; color: var(--text-main); border-bottom-right-radius: 2px; }
+        .ai-msg { align-self: flex-start; background: white; border: 1px solid #e2e8f0; border-bottom-left-radius: 2px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+
+        /* Tables and Formatting */
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; border-radius: 8px; overflow: hidden; background: white; }
+        th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: left; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+
+        /* Insight Bar */
+        .input-area { padding: 20px 15% 40px; background: white; border-top: 1px solid #f1f5f9; }
+        .insight-bar-container { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 20px; padding: 10px 18px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        
+        .insight-bar-container input { flex: 1; border: none; outline: none; padding: 12px; font-size: 16px; }
+        .insight-bar-container input:disabled { background: transparent; cursor: not-allowed; color: #94a3b8; }
+        
+        .data-selector { border: none; background: #eef2ff; padding: 10px; border-radius: 10px; margin-right: 12px; font-size: 13px; color: var(--accent); font-weight: 700; cursor: pointer; outline: none; }
+        .data-selector:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .send-btn { background: var(--accent); color: white; border: none; width: 45px; height: 45px; border-radius: 14px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+        .send-btn:hover:not(:disabled) { background: #4f46e5; transform: scale(1.05); }
+        .send-btn:disabled { background: #cbd5e1; cursor: not-allowed; opacity: 0.7; }
+
+        #connection_status { font-size: 12px; display: flex; align-items: center; gap: 6px; color: #10b981; }
+        .dot { height: 8px; width: 8px; border-radius: 50%; background: currentColor; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <span><i class="fas fa-magic"></i> AI History</span>
+            <i class="fas fa-trash-alt" title="Clear All" style="cursor:pointer; font-size: 13px;" onclick="clearAllHistory()"></i>
+        </div>
+        <div class="history-list" id="historyList"></div>
+        <div style="padding: 15px; border-top: 1px solid #1e293b;">
+            <button onclick="window.location.href='index.html'" style="width:100%; padding:12px; border:none; border-radius:10px; background:#1e293b; color:white; cursor:pointer; font-weight: 600; transition: 0.2s;">🏠 Portal Dashboard</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="top-nav">
+            <strong>Business Intelligence Analyst - <span id="activeCompanyNameDisplay">Loading...</span></strong>
+            <div id="connection_status">
+                <span class="dot"></span> <span>Live Context Enabled</span>
+            </div>
+        </div>
+
+        <div class="chat-window" id="chatWindow">
+            <div class="empty-state" id="emptyState">
+                <h1 id="welcomeGreeting">What can I help you with?</h1>
+                <p>Query your company records in natural language.</p>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="insight-bar-container">
+                <select class="data-selector" id="fileType">
+                    <option value="inventory">📦 Inventory</option>
+                    <option value="invoices">🧾 Sales</option>
+                    <option value="customers">👥 Customers</option>
+                </select>
+                <input type="text" id="userInput" placeholder="Ask about trends, totals, or stock..." onkeypress="checkEnter(event)">
+                <button class="send-btn" id="sendBtn" onclick="askQuestion()"><i class="fas fa-arrow-up"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem("AUTH_TOKEN");
+       const companyId = localStorage.getItem("activeCompanyId");
+const companyName = localStorage.getItem("activeCompanyName");
+
+if (!companyId || !companyName) {
+  alert("Company context missing. Please login again.");
+  window.location.href = "login.html";
+}
+
+
+        if (!token || !companyId) {
+            alert("Session expired. Please login again.");
+            window.location.href = "login.html";
+        }
+
+        const API_BASE = "https://asia-south1-bussiness-control-platform.cloudfunctions.net/api"; 
+        let chatHistory = JSON.parse(localStorage.getItem('AI_CHAT_HISTORY') || '[]');
+        
+        let isProcessing = false;
+
+        window.onload = () => { 
+            renderHistory(); 
+            // Update UI with company name
+            document.getElementById('activeCompanyNameDisplay').innerText = companyName;
+            document.getElementById('welcomeGreeting').innerText = `How can I help ${companyName} today?`;
+        };
+
+        async function askQuestion() {
+            if (isProcessing) return;
+
+            const input = document.getElementById('userInput');
+            const question = input.value.trim();
+            const fileType = document.getElementById('fileType').value;
+            const chatWindow = document.getElementById('chatWindow');
+            const btn = document.getElementById('sendBtn');
+            const selector = document.getElementById('fileType');
+
+            if (!question) return;
+
+            isProcessing = true;
+            input.disabled = true;
+            btn.disabled = true;
+            selector.disabled = true;
+
+            document.getElementById('emptyState').style.display = 'none';
+            appendMessage('user', question);
+            input.value = '';
+            
+            const loadId = "load-" + Date.now();
+            appendMessage('ai', 'Analyzing records...', loadId);
+
+            try {
+                const res = await fetch(`${API_BASE}/ai/analyze`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + token,
+                        "x-company-id": companyId,
+                        // 🔥 PASS DYNAMIC NAME IN HEADER
+                        "x-company-name": companyName 
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        fileType: fileType,
+                        companyId: companyId,
+                        // 🔥 PASS DYNAMIC NAME IN BODY
+                        companyName: companyName 
+                    })
+                });
+
+                const data = await res.json();
+                const loadEl = document.getElementById(loadId);
+
+                if (res.ok && data.status === 'success') {
+                    loadEl.innerHTML = marked.parse(data.answer);
+                    saveToHistory(question, data.answer);
+                } else {
+                    loadEl.innerText = data.error || data.message || "Failed to retrieve data.";
+                }
+            } catch (err) {
+                document.getElementById(loadId).innerText = "Backend Connection Error. Verify server deployment.";
+            } finally {
+                isProcessing = false;
+                input.disabled = false;
+                btn.disabled = false;
+                selector.disabled = false;
+                
+                input.focus(); 
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+            }
+        }
+
+        function appendMessage(role, text, id = "") {
+            const win = document.getElementById('chatWindow');
+            const div = document.createElement('div');
+            div.className = `message ${role}-msg`;
+            if (id) div.id = id;
+
+            if (role === 'ai') {
+                div.innerHTML = marked.parse(text); 
+            } else {
+                div.textContent = text; 
+            }
+
+            win.appendChild(div);
+            win.scrollTop = win.scrollHeight;
+        }
+
+        function saveToHistory(q, a) {
+            chatHistory.unshift({ q, a });
+            if (chatHistory.length > 15) chatHistory.pop();
+            localStorage.setItem('AI_CHAT_HISTORY', JSON.stringify(chatHistory));
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = chatHistory.map((item, idx) => `
+                <div class="history-item" onclick="loadHistoryItem(${idx})">
+                    <i class="far fa-file-alt"></i> ${item.q.substring(0, 20)}...
+                </div>
+            `).join('');
+        }
+
+        function loadHistoryItem(idx) {
+            if (isProcessing) return; 
+            
+            const item = chatHistory[idx];
+            document.getElementById('emptyState').style.display = 'none';
+            appendMessage('user', item.q);
+            appendMessage('ai', item.a); 
+        }
+
+        function clearAllHistory() {
+            if (confirm("Delete recent queries?")) {
+                localStorage.removeItem('AI_CHAT_HISTORY');
+                chatHistory = [];
+                renderHistory();
+            }
+        }
+
+        function checkEnter(e) { 
+            if (e.key === 'Enter' && !isProcessing) {
+                askQuestion(); 
+            } else if (e.key === 'Enter' && isProcessing) {
+                e.preventDefault();
+            }
+        }
+    </script>
+</body>
+</html>

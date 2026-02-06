@@ -30,7 +30,7 @@
       margin-top: 10px;
       border: 1px solid #ddd;
       border-radius: 4px;
-      box-sizing: border-box; /* Ensures padding doesn't break width */
+      box-sizing: border-box;
     }
     button {
       background: #28a745;
@@ -111,9 +111,7 @@ function logout() {
   window.location.href = "admin-login.html";
 }
 
-/**
- * Universal Fetch Helper with Error Handling
- */
+
 async function adminFetch(path, method = "GET", body = null) {
   try {
     const options = {
@@ -140,8 +138,6 @@ async function adminFetch(path, method = "GET", body = null) {
     throw err;
   }
 }
-
-/* --- COMPANIES LOGIC --- */
 
 async function loadCompanies() {
   try {
@@ -215,7 +211,7 @@ async function toggleCompany(id, currentStatus) {
   }
 }
 
-/* --- OWNER LOGIC --- */
+
 
 async function createOwner() {
   const email = document.getElementById("ownerEmail").value.trim();

@@ -1,25 +1,13 @@
-const { bucket } = require("../config/firebase");
+const { getBucket } = require("../config/firebase");
 const { getProductBySku, updateProduct, AppError } = require("./productController");
 
-/* =========================================================
-    1. PATH HELPERS (Company Scoping)
-========================================================= */
+// Initialize bucket instance
+const bucket = getBucket();
 
-/**
- * Rule: Movement history is nested under the specific company folder.
- * Path: companies/{companyId}/movements/{sku}.json
- */
 const getMovementFile = (companyId, sku) =>
   bucket.file(`companies/${companyId}/movements/${sku}.json`);
 
-/* =========================================================
-    2. CORE AUDIT LOGIC
-========================================================= */
 
-/**
- * Internal helper to record every stock change.
- * Ensures an audit trail exists ONLY for the relevant company.
- */
 async function recordMovement(
   companyId,
   product,
@@ -85,14 +73,6 @@ async function recordMovement(
   await file.save(JSON.stringify(history, null, 2));
 }
 
-/* =========================================================
-    3. STOCK OPERATIONS (Company-Scoped)
-========================================================= */
-
-/**
- * STOCK IN: Adds stock and recalculates Average Cost (WAC) for THIS company.
- * Updated: Handles "Rollbacks" (Cancellations) without distorting WAC.
- */
 async function stockIn(
   companyId,
   sku,
@@ -105,9 +85,6 @@ async function stockIn(
 
   if (!quantity || quantity <= 0)
     throw new AppError(400, "Quantity must be greater than zero");
-
-  // Rule: For standard "Stock In", cost is required.
-  // For "Rollbacks", allow fallback to current average cost.
   if (costPerUnit == null || costPerUnit < 0) {
     if (!note.toLowerCase().includes("rollback")) {
       throw new AppError(
@@ -166,10 +143,6 @@ async function stockIn(
 
   return updatedProduct;
 }
-
-/**
- * STOCK OUT: Deducts stock based on current Weighted Average Cost.
- */
 async function stockOut(companyId, sku, { quantity, note = "", date = null }) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 
@@ -204,9 +177,6 @@ async function stockOut(companyId, sku, { quantity, note = "", date = null }) {
   return updatedProduct;
 }
 
-/**
- * STOCK ADJUSTMENT: Manual correction of stock levels.
- */
 async function stockAdjustment(
   companyId,
   sku,
@@ -242,13 +212,6 @@ async function stockAdjustment(
   return updatedProduct;
 }
 
-/* =========================================================
-    4. REPORTING
-========================================================= */
-
-/**
- * GET ALL MOVEMENTS: Aggregates history for the entire company.
- */
 async function getAllMovements(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
 

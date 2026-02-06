@@ -1,7 +1,4 @@
-/**
- * GLOBAL ERROR HANDLER
- * Ensures all errors (Validation, Firebase, or System) return a JSON response.
- */
+
 function handleError(err, res) {
   const timestamp = new Date().toISOString();
 
@@ -28,16 +25,12 @@ Code:      ${err.code || "N/A"}
     return;
   }
 
-  /* =========================================================
-     DEFAULT VALUES (If no specific mapping is found)
-  ========================================================= */
+
   let status = 500;
   let businessReason = "An internal system error occurred. Please try again.";
   let uiTitle = "System Error";
 
-  /* =========================================================
-     ERROR CODE MAPPING (Firebase / Storage / Logic)
-  ========================================================= */
+
   const errorMapping = {
     "storage/object-not-found": {
       status: 404,
@@ -61,10 +54,6 @@ Code:      ${err.code || "N/A"}
     }
   };
 
-  /* =========================================================
-     LOGIC: PRIORITIZE CUSTOM APP ERRORS
-  ========================================================= */
-  
   // A. Check for AppError (errors thrown manually with statusCode)
   if (err.statusCode) {
     status = err.statusCode;
@@ -82,10 +71,6 @@ Code:      ${err.code || "N/A"}
     businessReason = err.message;
   }
 
-  /* =========================================================
-     FINAL PAYLOAD CONSTRUCTION (Strict JSON)
-  ========================================================= */
-  
   const payload = JSON.stringify({
     success: false,
     message: businessReason, 
