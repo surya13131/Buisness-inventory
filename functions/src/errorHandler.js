@@ -1,6 +1,26 @@
-
 function handleError(err, res) {
   const timestamp = new Date().toISOString();
+
+  // ===================== 🔴 CORS SUPPORT START =====================
+  // This block ensures errors aren't blocked by the browser policy
+  const allowedOrigins = [
+    "https://bussiness-control-platform.web.app",
+    "https://bussiness-control-platform.firebaseapp.com",
+    "http://localhost:5000",
+    "http://localhost:5500"
+  ];
+
+  const origin = res.req?.headers?.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*"); 
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-company-id, x-user-email, x-admin");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  // ===================== 🔴 CORS SUPPORT END =======================
 
   // Extract request info safely for logging
   const req = res.req || {};
@@ -25,11 +45,9 @@ Code:      ${err.code || "N/A"}
     return;
   }
 
-
   let status = 500;
   let businessReason = "An internal system error occurred. Please try again.";
   let uiTitle = "System Error";
-
 
   const errorMapping = {
     "storage/object-not-found": {

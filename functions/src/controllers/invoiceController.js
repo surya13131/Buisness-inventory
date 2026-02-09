@@ -97,7 +97,6 @@ async function cancelInvoice(companyId, invoiceNumber) {
 
   const file = getInvoiceFile(companyId, invoiceNumber);
   const [exists] = await file.exists();
-
   if (!exists) throw new AppError(404, "Invoice not found");
 
   const [content] = await file.download();
@@ -107,16 +106,16 @@ async function cancelInvoice(companyId, invoiceNumber) {
     throw new AppError(400, "Invoice is already cancelled.");
   }
 
-  // 1. Stock Rollback: Return each item to stock
-  for (const item of invoice.items) {
-    await stockIn(companyId, item.sku, {
+  // 🟢 FIX 1: Parallel Stock Rollback (Faster)
+  await Promise.all(invoice.items.map(item => 
+    stockIn(companyId, item.sku, {
       quantity: item.quantity,
-      costPerUnit: item.costPrice, // Return at the recorded cost price
+      costPerUnit: item.costPrice,
       note: `Rollback: Cancelled ${invoiceNumber}`,
-    });
-  }
+    })
+  ));
 
-  // 2. Financial Reset & Status Update
+  // 🟢 FIX 2: Explicitly update status and SAVE
   invoice.status = "Cancelled";
   invoice.totalAmount = 0; 
   invoice.outstandingAmount = 0; 
@@ -124,7 +123,7 @@ async function cancelInvoice(companyId, invoiceNumber) {
   invoice.cancelledAt = new Date().toISOString();
 
   await file.save(JSON.stringify(invoice, null, 2));
-  return { success: true, message: "Invoice cancelled and stock returned.", invoice };
+  return { success: true, message: "Invoice cancelled", invoice };
 }
 
 
