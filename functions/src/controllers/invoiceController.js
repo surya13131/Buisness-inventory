@@ -30,7 +30,8 @@ async function createInvoice(companyId, data) {
   const { customer, items, dueDate, status } = data;
   const invId = `INV-${Date.now()}`;
 
-  let invoiceTotal = 0;
+  let invoiceSubtotal = 0; // Total before tax
+  let totalTaxAmount = 0;
   let totalCostOfGoods = 0;
   const finalItems = [];
 
@@ -47,8 +48,15 @@ async function createInvoice(companyId, data) {
 
     const sellingPrice = Number(product.sellingPrice);
     const costPrice = Number(product.costPrice);
+    const taxPercent = Number(product.taxPercent || 0);
 
-    invoiceTotal += item.quantity * sellingPrice;
+    // Calculate Tax for this item
+    const lineSubtotal = item.quantity * sellingPrice;
+    const lineTax = lineSubtotal * (taxPercent / 100);
+    const lineTotalWithTax = lineSubtotal + lineTax;
+
+    invoiceSubtotal += lineSubtotal;
+    totalTaxAmount += lineTax;
     totalCostOfGoods += item.quantity * costPrice;
 
     finalItems.push({
@@ -57,11 +65,16 @@ async function createInvoice(companyId, data) {
       quantity: item.quantity,
       sellingPrice,
       costPrice, 
-      lineTotal: item.quantity * sellingPrice,
+      taxPercent,
+      taxAmount: Number(lineTax.toFixed(2)),
+      lineSubtotal: Number(lineSubtotal.toFixed(2)),
+      lineTotal: Number(lineTotalWithTax.toFixed(2)),
     });
   }
 
-  const grossProfit = invoiceTotal - totalCostOfGoods;
+  // Profit is calculated on Subtotal (Revenue minus Cost), excluding Tax
+  const grossProfit = invoiceSubtotal - totalCostOfGoods;
+  const grandTotal = invoiceSubtotal + totalTaxAmount;
 
   for (const item of finalItems) {
     await stockOut(companyId, item.sku, {
@@ -81,8 +94,10 @@ async function createInvoice(companyId, data) {
     dueDate: status === "Paid" ? null : dueDate,
     paidOn: status === "Paid" ? now : null,
     items: finalItems,
-    totalAmount: Number(invoiceTotal.toFixed(2)),
-    outstandingAmount: status === "Paid" ? 0 : Number(invoiceTotal.toFixed(2)),
+    subtotal: Number(invoiceSubtotal.toFixed(2)),
+    totalTax: Number(totalTaxAmount.toFixed(2)),
+    totalAmount: Number(grandTotal.toFixed(2)),
+    outstandingAmount: status === "Paid" ? 0 : Number(grandTotal.toFixed(2)),
     grossProfit: Number(grossProfit.toFixed(2)),
     status: status === "Paid" ? "Paid" : "Unpaid",
   };
@@ -106,7 +121,6 @@ async function cancelInvoice(companyId, invoiceNumber) {
     throw new AppError(400, "Invoice is already cancelled.");
   }
 
-  // 🟢 FIX 1: Parallel Stock Rollback (Faster)
   await Promise.all(invoice.items.map(item => 
     stockIn(companyId, item.sku, {
       quantity: item.quantity,
@@ -115,8 +129,9 @@ async function cancelInvoice(companyId, invoiceNumber) {
     })
   ));
 
-  // 🟢 FIX 2: Explicitly update status and SAVE
   invoice.status = "Cancelled";
+  invoice.subtotal = 0;
+  invoice.totalTax = 0;
   invoice.totalAmount = 0; 
   invoice.outstandingAmount = 0; 
   invoice.grossProfit = 0; 
@@ -141,19 +156,16 @@ async function getDashboardSummary(companyId) {
   };
 
   invoices.forEach((inv) => {
-
     if (inv.status === "Cancelled") return;
 
     const invDate = new Date(inv.date);
-
-    
     summary.totalOutstanding += inv.outstandingAmount || 0;
-
 
     if (
       invDate.getMonth() === now.getMonth() &&
       invDate.getFullYear() === now.getFullYear()
     ) {
+      // Sales include tax, Profit is pure margin
       summary.monthlySales += inv.totalAmount;
       summary.monthlyProfit += inv.grossProfit || 0;
 

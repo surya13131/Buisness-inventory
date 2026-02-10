@@ -18,16 +18,20 @@ const errorHandler = require("./errorHandler");
 const allowedOrigins = [
   "https://bussiness-control-platform.web.app",
   "https://bussiness-control-platform.firebaseapp.com",
+  "http://localhost:5173",
   "http://localhost:5000",
   "http://localhost:5500"
 ];
 
 const corsHandler = cors({
   origin: function (origin, callback) {
+    // allow server-to-server & tools
     if (!origin) return callback(null, true);
+
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+
     return callback(new Error("Blocked by CORS"));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -40,7 +44,9 @@ const corsHandler = cors({
   ]
 });
 
+
 const getRequestBody = async (req) => {
+  // If req.body is already present (parsed by Firebase), return it
   if (req.body && typeof req.body === 'object') return req.body;
 
   return new Promise((resolve, reject) => {
@@ -48,6 +54,7 @@ const getRequestBody = async (req) => {
     req.on("data", chunk => (data += chunk));
     req.on("end", () => {
       try {
+        // Resolve to empty object if data is blank
         resolve(data ? JSON.parse(data) : {});
       } catch (err) {
         reject(new Error("Invalid JSON body"));
@@ -57,7 +64,9 @@ const getRequestBody = async (req) => {
   });
 };
 
+
 const apiHandler = (req, res) => {
+  // Lightweight Express-like helpers
   res.setHeader("Vary", "Origin");
   res.status = function (code) {
     res.statusCode = code;
@@ -76,19 +85,33 @@ const apiHandler = (req, res) => {
     } else {
       res.setHeader("Access-Control-Allow-Origin", "*"); 
     }
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-company-id, x-user-email, x-admin");
+
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    );
+
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, x-company-id, x-user-email, x-admin"
+    );
+
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Max-Age", "86400");
+
     return res.status(204).end();
   }
 
+
+
   return corsHandler(req, res, async () => {
     try {
+
       if (allowedOrigins.includes(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
       }
 
+   
       if (["POST", "PUT", "PATCH"].includes(req.method)) {
         req.body = await getRequestBody(req);
       } else {
@@ -101,6 +124,7 @@ const apiHandler = (req, res) => {
 
       console.log(`[${method}] ${path}`);
 
+ 
       if ((path === "/health" || path === "/api/health") && method === "GET") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok" }));
@@ -123,90 +147,201 @@ const apiHandler = (req, res) => {
 
       if (segments[0] === "admin" && segments[1] !== "login") {
         return requireAdmin(req, res, async () => {
+
+          /* ---------- COMPANIES ---------- */
           if (segments[1] === "companies" && segments.length === 2) {
             if (method === "POST") {
-              return res.status(201).json(await adminController.createCompany(req));
+              return res.status(201).json(
+                await adminController.createCompany(req)
+              );
             }
             if (method === "GET") {
-              return res.json(await adminController.listCompanies());
+              return res.json(
+                await adminController.listCompanies()
+              );
             }
           }
 
-          if (segments[1] === "companies" && segments.length === 4 && method === "POST") {
+          if (
+            segments[1] === "companies" &&
+            segments.length === 4 &&
+            method === "POST"
+          ) {
             const companyId = segments[2];
-            if (segments[3] === "activate") return res.json(await adminController.activateCompany(companyId));
-            if (segments[3] === "suspend") return res.json(await adminController.suspendCompany(companyId));
+
+            if (segments[3] === "activate") {
+              return res.json(
+                await adminController.activateCompany(companyId)
+              );
+            }
+
+            if (segments[3] === "suspend") {
+              return res.json(
+                await adminController.suspendCompany(companyId)
+              );
+            }
           }
 
+          /* ---------- USERS ---------- */
           if (segments[1] === "users" && segments.length === 2) {
-            if (method === "POST") return res.status(201).json(await adminController.createOwnerUser(req));
+            if (method === "POST") {
+              return res.status(201).json(
+                await adminController.createOwnerUser(req)
+              );
+            }
           }
 
-          if (segments[1] === "users" && segments.length === 4 && method === "PATCH" && segments[3] === "status") {
+          if (
+            segments[1] === "users" &&
+            segments.length === 4 &&
+            method === "PATCH" &&
+            segments[3] === "status"
+          ) {
             const email = segments[2];
             const { status, companyId } = req.body;
-            return res.json(await adminController.updateUserStatus(email, status, companyId));
+
+            return res.json(
+              await adminController.updateUserStatus(email, status, companyId)
+            );
           }
 
-          return res.status(404).json({ message: "Admin route not found" });
+          return res.status(404).json({
+            message: "Admin route not found"
+          });
         });
       }
 
       if (path === "/login" && method === "POST") {
-        return res.status(200).json(await userController.userLogin(req.body));
+        return res.status(200).json(
+          await userController.userLogin(req.body)
+        );
       }
 
       return requireAuth(req, res, () =>
         companyGuard(req, res, async () => {
 
+          /* ---------- AI ANALYTICS ---------- */
+          if ((path === "/ai/analyze" || path === "/api/ai/analyze") && method === "POST") {
+            return await aiController.handleAiQuery(req, res);
+          }
+
+          /* ---------- COMPANY USERS (OWNER ONLY) ---------- */
           if (path === "/company-users" && method === "GET") {
-            return res.json(await userController.getCompanyUsers(req.companyId, req.user));
+            return res.json(
+              await userController.getCompanyUsers(req.companyId, req.user)
+            );
           }
 
           if (path === "/dashboard-summary" && method === "GET") {
-            return res.json(await invoiceController.getDashboardSummary(req.companyId));
+            return res.json(
+              await invoiceController.getDashboardSummary(req.companyId)
+            );
           }
 
           if (path === "/products") {
-            if (method === "GET") return res.json(await productController.getAllProducts(req.companyId));
+            if (method === "GET") {
+              return res.json(
+                await productController.getAllProducts(req.companyId)
+              );
+            }
+
             if (method === "POST") {
               try {
-                return res.status(201).json(await productController.createProduct(req.companyId, req.body));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await productController.createProduct(
+                  req.companyId,
+                  req.body
+                );
+                return res.status(201).json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
           }
 
           if (segments[0] === "products" && segments.length === 2) {
             const sku = segments[1];
-            if (method === "GET") return res.json(await productController.getProductBySku(req.companyId, sku));
-            if (method === "DELETE") return res.json(await productController.deleteProduct(req.companyId, sku));
-          }
 
-          /* ---------- CUSTOMERS (GST OPTIONAL LOGIC IN CONTROLLER) ---------- */
-          if (path === "/customers") {
-            if (method === "GET") return res.json(await customerController.getAllCustomers(req.companyId));
-            if (method === "POST") {
+            if (method === "GET") {
+              return res.json(
+                await productController.getProductBySku(req.companyId, sku)
+              );
+            }
+
+            // ✅ NEW: EDIT PRODUCT ROUTE
+            if (method === "PUT") {
               try {
-                // Controller handles optional GST validation
-                return res.status(201).json(await customerController.createCustomer(req.companyId, req.body));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await productController.updateProduct(
+                  req.companyId,
+                  sku,
+                  req.body
+                );
+                return res.json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
+            }
+
+            // ✅ NEW: DELETE PRODUCT ROUTE
+            if (method === "DELETE") {
+              try {
+                const result = await productController.deleteProduct(
+                  req.companyId,
+                  sku
+                );
+                return res.json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
           }
 
-          // ✅ NEW: CUSTOMER EDIT & DELETE ROUTES
+          /* ---------- CUSTOMERS (CRUD UPDATED) ---------- */
+          if (path === "/customers") {
+            if (method === "GET") {
+              return res.json(
+                await customerController.getAllCustomers(req.companyId)
+              );
+            }
+
+            if (method === "POST") {
+              try {
+                const result = await customerController.createCustomer(
+                  req.companyId,
+                  req.body
+                );
+                return res.status(201).json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
+            }
+          }
+
           if (segments[0] === "customers" && segments.length === 2) {
             const customerId = segments[1];
-            
+
             if (method === "PUT") {
               try {
-                return res.json(await customerController.updateCustomer(req.companyId, customerId, req.body));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await customerController.updateCustomer(
+                  req.companyId,
+                  customerId,
+                  req.body
+                );
+                return res.json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
 
             if (method === "DELETE") {
               try {
-                return res.json(await customerController.deleteCustomer(req.companyId, customerId));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await customerController.deleteCustomer(
+                  req.companyId,
+                  customerId
+                );
+                return res.json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
           }
 
@@ -217,39 +352,79 @@ const apiHandler = (req, res) => {
 
             if (action === "cancel" && method === "POST") {
               try {
-                return res.status(200).json(await invoiceController.cancelInvoice(req.companyId, invoiceNumber));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await invoiceController.cancelInvoice(req.companyId, invoiceNumber);
+                return res.status(200).json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
 
             if (action === "payments" && method === "POST") {
               try {
-                return res.status(201).json(await invoiceController.recordPayment(req.companyId, invoiceNumber, req.body));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await invoiceController.recordPayment(
+                  req.companyId,
+                  invoiceNumber,
+                  req.body
+                );
+                return res.status(201).json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
           }
 
           if (path === "/invoices") {
-            if (method === "GET") return res.json(await invoiceController.getAllInvoices(req.companyId));
+            if (method === "GET") {
+              return res.json(
+                await invoiceController.getAllInvoices(req.companyId)
+              );
+            }
+
             if (method === "POST") {
               try {
-                return res.status(201).json(await invoiceController.createInvoice(req.companyId, req.body));
-              } catch (err) { return errorHandler(err, res); }
+                const result = await invoiceController.createInvoice(
+                  req.companyId,
+                  req.body
+                );
+                return res.status(201).json(result);
+              } catch (err) {
+                return errorHandler(err, res);
+              }
             }
           }
 
           if (path === "/reports/export" && method === "GET") {
-            return res.json(await reportController.getExportData(req.companyId));
+            return res.json(
+              await reportController.getExportData(req.companyId)
+            );
           }
 
           if (path === "/movements" && method === "GET") {
-            return res.json(await inventoryController.getAllMovements(req.companyId));
+            return res.json(
+              await inventoryController.getAllMovements(req.companyId)
+            );
           }
 
           if (method === "POST" && segments.length === 2) {
             const [operation, sku] = segments;
-            if (operation === "stock-in") return res.json(await inventoryController.stockIn(req.companyId, sku, req.body));
-            if (operation === "stock-out") return res.json(await inventoryController.stockOut(req.companyId, sku, req.body));
-            if (operation === "stock-adjustment") return res.json(await inventoryController.stockAdjustment(req.companyId, sku, req.body));
+
+            if (operation === "stock-in") {
+              return res.json(
+                await inventoryController.stockIn(req.companyId, sku, req.body)
+              );
+            }
+
+            if (operation === "stock-out") {
+              return res.json(
+                await inventoryController.stockOut(req.companyId, sku, req.body)
+              );
+            }
+
+            if (operation === "stock-adjustment") {
+              return res.json(
+                await inventoryController.stockAdjustment(req.companyId, sku, req.body)
+              );
+            }
           }
 
           return res.status(404).json({ message: "Route not found" });

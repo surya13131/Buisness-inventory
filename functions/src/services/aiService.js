@@ -108,6 +108,11 @@ const analyzeData = async (question, jsonData = {}, companyName = "the company")
         Politely ask them to clarify their business query.`
     : hasBusinessData
     ? `
+    ### SYSTEM PROTOCOL:
+1. **FORBIDDEN**: Do not output JSON, curly braces {}, or code blocks.
+2. **FORMAT**: Provide a brief summary sentence followed by a Markdown table.
+3. **CURRENCY**: Use the ₹ symbol for all values. 
+
 ### USER INTENT PROTOCOL (MANDATORY):
 1. **IDENTIFY QUANTITY**: 
    - If user specifies a number (e.g. "top 3"), provide EXACTLY that number.

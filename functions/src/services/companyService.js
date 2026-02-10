@@ -1,7 +1,6 @@
-// ✅ FIX: Import getBucket instead of bucket
+
 const { getBucket } = require("../config/firebase");
 
-// ✅ FIX: Call getBucket() inside the helper or functions
 const getCompanyFile = (companyId) => {
   const bucket = getBucket();
   return bucket.file(`companies-master/${companyId}.json`);

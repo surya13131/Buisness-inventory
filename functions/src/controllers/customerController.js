@@ -1,8 +1,6 @@
 const { getBucket } = require("../config/firebase");
 const { AppError } = require("./productController"); 
 const companyService = require("../services/companyService");
-
-// Initialize bucket by calling the function
 const bucket = getBucket();
 
 async function validateCompanyAccess(companyId) {
@@ -40,20 +38,34 @@ function isValidEmail(email) {
     return pattern.test(email);
 }
 
+// Helper to validate 6-digit Indian Pincode
+function isValidPincode(pincode) {
+    const pattern = /^[1-9][0-9]{5}$/;
+    return pattern.test(pincode);
+}
+
 async function createCustomer(companyId, data) {
     // 1. Verify company exists and is active
     await validateCompanyAccess(companyId);
 
-    const { name, phone, email = "", address = "", gst } = data || {};
+    const { 
+        name, 
+        phone, 
+        email = "", 
+        address = "", 
+        district = "", 
+        pincode = "", 
+        gst = "" 
+    } = data || {};
 
-    // 2. Data Validation (Required Fields)
-    if (!name || !phone || !gst) {
-        throw new AppError(400, "Missing required fields: Name, Phone, and GST.");
+    // 2. Data Validation
+    if (!name || !phone) {
+        throw new AppError(400, "Missing required fields: Name and Phone.");
     }
 
-    // 2b. GST Format Check
-    if (!isValidGST(gst)) {
-        throw new AppError(400, "Invalid GST Number format. Must be 15 characters (e.g., 22AAAAA0000A1Z5).");
+    // 2b. Optional GST Format Check
+    if (gst && !isValidGST(gst)) {
+        throw new AppError(400, "Invalid GST Number format. Must be 15 characters.");
     }
 
     // 2c. Phone Format Check
@@ -61,58 +73,112 @@ async function createCustomer(companyId, data) {
         throw new AppError(400, "Invalid Phone Number. Please provide a 10-digit mobile number.");
     }
 
-    // 2d. Email Format Check (Only if email is provided)
+    // 2d. Pincode Format Check (Optional but validated if provided)
+    if (pincode && !isValidPincode(pincode)) {
+        throw new AppError(400, "Invalid Pincode. Please provide a valid 6-digit number.");
+    }
+
+    // 2e. Email Format Check
     if (email && !isValidEmail(email)) {
         throw new AppError(400, "Invalid Email Address format.");
     }
 
-    const normalizedGST = gst.toUpperCase();
+    const normalizedGST = gst ? gst.toUpperCase() : "";
 
-    // 3. Duplicate Check (Optimized)
-    const existingCustomers = await getAllCustomers(companyId);
-    if (existingCustomers.some(c => c.gst === normalizedGST)) {
-        throw new AppError(409, "A customer with this GST already exists.");
+    // 3. Duplicate Check (Only if GST is provided)
+    if (normalizedGST) {
+        const existingCustomers = await getAllCustomers(companyId);
+        if (existingCustomers.some(c => c.gst === normalizedGST)) {
+            throw new AppError(409, "A customer with this GST already exists.");
+        }
     }
 
     const customerId = `CUST-${Date.now()}`;
 
     const customer = {
-        companyId, // 🔒 Mandatory ownership stamp
+        companyId, 
         id: customerId,
         name,
         phone,
         email,
         address,
+        district, 
+        pincode,  
         gst: normalizedGST,
         status: "ENABLED",
         createdAt: new Date().toISOString(),
     };
 
-    // 4. Save to Cloud Storage
     try {
         await getCustomerFile(companyId, customerId).save(
             JSON.stringify(customer, null, 2),
-            { 
-                contentType: "application/json",
-                resumable: false // Faster for small JSON files
-            }
+            { contentType: "application/json", resumable: false }
         );
 
-        return {
-            success: true,
-            message: "Customer created successfully.",
-            customer,
-        };
+        return { success: true, message: "Customer created successfully.", customer };
     } catch (error) {
         throw new AppError(500, "Failed to save customer data.");
     }
 }
 
-/**
- * GET ALL CUSTOMERS: Retrieves all billing profiles for the company.
- */
+async function updateCustomer(companyId, customerId, data) {
+    await validateCompanyAccess(companyId);
+
+    const file = getCustomerFile(companyId, customerId);
+    const [exists] = await file.exists();
+    if (!exists) throw new AppError(404, "Customer not found.");
+
+    const [content] = await file.download();
+    const existingData = JSON.parse(content.toString());
+
+    const { name, phone, email, address, district, pincode, gst, status } = data;
+
+    // Validate updates if provided
+    if (gst && !isValidGST(gst)) throw new AppError(400, "Invalid GST format.");
+    if (phone && !isValidPhone(phone)) throw new AppError(400, "Invalid Phone number.");
+    if (pincode && !isValidPincode(pincode)) throw new AppError(400, "Invalid Pincode.");
+
+    const updatedCustomer = {
+        ...existingData,
+        name: name || existingData.name,
+        phone: phone || existingData.phone,
+        email: email !== undefined ? email : existingData.email,
+        address: address !== undefined ? address : existingData.address,
+        district: district !== undefined ? district : existingData.district, // Updated
+        pincode: pincode !== undefined ? pincode : existingData.pincode,    // Updated
+        gst: gst ? gst.toUpperCase() : existingData.gst,
+        status: status || existingData.status,
+        updatedAt: new Date().toISOString()
+    };
+
+    try {
+        await file.save(JSON.stringify(updatedCustomer, null, 2), {
+            contentType: "application/json",
+            resumable: false
+        });
+        return { success: true, message: "Customer updated successfully.", customer: updatedCustomer };
+    } catch (error) {
+        throw new AppError(500, "Failed to update customer data.");
+    }
+}
+
+async function deleteCustomer(companyId, customerId) {
+    await validateCompanyAccess(companyId);
+
+    const file = getCustomerFile(companyId, customerId);
+    const [exists] = await file.exists();
+
+    if (!exists) throw new AppError(404, "Customer not found.");
+
+    try {
+        await file.delete();
+        return { success: true, message: "Customer deleted successfully." };
+    } catch (error) {
+        throw new AppError(500, "Failed to delete customer.");
+    }
+}
+
 async function getAllCustomers(companyId) {
-    // 🔒 Ensure the company is valid before fetching
     await validateCompanyAccess(companyId);
 
     const [files] = await bucket.getFiles({
@@ -141,5 +207,7 @@ async function getAllCustomers(companyId) {
 
 module.exports = {
     createCustomer,
+    updateCustomer,
+    deleteCustomer,
     getAllCustomers,
 };

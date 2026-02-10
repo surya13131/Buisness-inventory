@@ -1,4 +1,3 @@
-
 function requireAdmin(req, res, next) {
   const adminHeader = req.headers["x-admin"];
 

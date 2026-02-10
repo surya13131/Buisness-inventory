@@ -1,11 +1,5 @@
 const { getBucket } = require("../config/firebase");
 const { analyzeData } = require("../services/aiService");
-
-/**
- * MASTER SANITIZER: 
- * 1. Replaces empty boxes with 0 or "N/A".
- * 2. Ensures no "null" values confuse the AI's math.
- */
 const sanitizeData = (data) => {
   if (Array.isArray(data)) return data.map(item => sanitizeData(item));
   if (typeof data === "object" && data !== null) {
@@ -34,17 +28,14 @@ const handleAiQuery = async (req, res) => {
     const { question } = req.body || {};
     const companyId = req.companyId || req.body?.companyId;
     
-    // 🔥 DYNAMIC COMPANY NAME: Extract from headers or body so it isn't hardcoded
-   // 🔥 REMOVED "Zhians" - Now it must find a name or it stays "the company"
+
 const companyName = req.headers["x-company-name"] || req.body?.companyName || "the company";
 
     if (!question || !companyId) {
       return res.status(400).json({ status: "error", message: "Missing required fields." });
     }
 
-    /* -------------------------------------------------
-        1️⃣ GENERAL CONVERSATION DETECTOR
-    -------------------------------------------------- */
+
     const cleanQuestion = question.trim().toLowerCase();
     const conversationalTriggers = ["hi", "hey", "hello", "how are you", "who are you", "what can you do"];
     const isGeneralConversation = conversationalTriggers.some(t => cleanQuestion.startsWith(t)) && cleanQuestion.split(" ").length <= 6;
@@ -87,8 +78,6 @@ const companyName = req.headers["x-company-name"] || req.body?.companyName || "t
       }
     }
 
-    // 🔥 TRAINING STEP: Cross-Reference to handle DELETED items
-    // Create a Set of SKUs that actually exist in the products folder
     const activeSkus = new Set(rawData.products.map(p => p.sku?.toString()));
 
     // Sanitize and tag invoices to inform AI about deleted products
@@ -114,15 +103,11 @@ const companyName = req.headers["x-company-name"] || req.body?.companyName || "t
       systemMetadata: {
         currentTimestamp: new Date().toISOString(),
         companyId: companyId,
-        companyName: companyName, // Added to context for AI grounding
+        companyName: companyName, 
         note: "Items marked 'DELETED_FROM_CATALOG' are historical only. 'stockMovementHistory' contains a full audit log of all quantity changes."
       }
     };
 
-    /* -------------------------------------------------
-        3️⃣ AI EXECUTION
-    -------------------------------------------------- */
-    // 🔥 FIX: Pass companyName as the 3rd argument to override the "Zhians" default
     const answer = await analyzeData(question, finalContext, companyName);
 
     return res.status(200).json({ status: "success", answer });

@@ -7,7 +7,6 @@ const bucket = getBucket();
 const getMovementFile = (companyId, sku) =>
   bucket.file(`companies/${companyId}/movements/${sku}.json`);
 
-
 async function recordMovement(
   companyId,
   product,

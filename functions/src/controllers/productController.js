@@ -8,12 +8,13 @@ class AppError extends Error {
   constructor(statusCode, message) {
     super(message);
     this.statusCode = statusCode;
-    this.Error.captureStackTrace(this, this.constructor);
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
   }
 }
 
 const getTimestamp = () => new Date().toISOString();
-
 
 async function validateCompanyAccess(companyId) {
   if (!companyId) throw new AppError(400, "Company ID is required");
@@ -50,7 +51,7 @@ const getProductFile = (companyId, sku) =>
 
 async function createProduct(
   companyId,
-  { sku, name, category = "", costPrice, sellingPrice = 0, reorderLevel = 0 }
+  { sku, name, category = "", costPrice, sellingPrice = 0, reorderLevel = 0, taxPercent = 0 }
 ) {
   await validateCompanyAccess(companyId);
 
@@ -60,6 +61,7 @@ async function createProduct(
   const finalCostPrice = Number(parseFloat(costPrice).toFixed(2));
   const finalSellingPrice = Number(parseFloat(sellingPrice).toFixed(2));
   const finalReorderLevel = Number(parseInt(reorderLevel) || 0);
+  const finalTaxPercent = Number(parseFloat(taxPercent) || 0);
 
   if (finalCostPrice < 0)
     throw new AppError(400, "Cost price cannot be negative");
@@ -67,6 +69,8 @@ async function createProduct(
     throw new AppError(400, "Selling price cannot be negative");
   if (finalReorderLevel < 0)
     throw new AppError(400, "Reorder level cannot be negative");
+  if (finalTaxPercent < 0)
+    throw new AppError(400, "Tax percentage cannot be negative");
 
   const finalSku = sku ? String(sku) : `SKU${Date.now()}`;
   const file = getProductFile(companyId, finalSku);
@@ -86,6 +90,7 @@ async function createProduct(
     costPrice: finalCostPrice,
     sellingPrice: finalSellingPrice,
     reorderLevel: finalReorderLevel,
+    taxPercent: finalTaxPercent, // New tax field
     stockOnHand: 0,
     averageCost: finalCostPrice,
     inventoryValue: 0,
@@ -179,9 +184,11 @@ async function updateProduct(companyId, sku, updates) {
     );
   if (updates.stockOnHand != null)
     updates.stockOnHand = Number(parseInt(updates.stockOnHand));
+  if (updates.taxPercent != null)
+    updates.taxPercent = Number(parseFloat(updates.taxPercent));
 
-  if (updates.costPrice < 0 || updates.sellingPrice < 0)
-    throw new AppError(400, "Price fields cannot be negative");
+  if (updates.costPrice < 0 || updates.sellingPrice < 0 || (updates.taxPercent != null && updates.taxPercent < 0))
+    throw new AppError(400, "Numeric fields cannot be negative");
 
   const updatedProduct = {
     ...product,

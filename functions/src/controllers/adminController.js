@@ -108,9 +108,6 @@ async function createOwnerUser(req) {
   };
 }
 
-/* =========================================================
-   4. USER STATUS MANAGEMENT (ENABLE / DISABLE)
-========================================================= */
 async function updateUserStatus(email, status, companyId) {
   if (!email || !companyId || !["ENABLED", "DISABLED"].includes(status)) {
     throw new Error("Email, Company ID, and valid status required");

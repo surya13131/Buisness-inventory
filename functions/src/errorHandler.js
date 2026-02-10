@@ -1,8 +1,5 @@
 function handleError(err, res) {
   const timestamp = new Date().toISOString();
-
-  // ===================== 🔴 CORS SUPPORT START =====================
-  // This block ensures errors aren't blocked by the browser policy
   const allowedOrigins = [
     "https://bussiness-control-platform.web.app",
     "https://bussiness-control-platform.firebaseapp.com",
@@ -20,14 +17,12 @@ function handleError(err, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-company-id, x-user-email, x-admin");
   res.setHeader("Access-Control-Allow-Credentials", "true");
-  // ===================== 🔴 CORS SUPPORT END =======================
 
-  // Extract request info safely for logging
   const req = res.req || {};
   const method = req.method || "N/A";
   const path = req.url || "N/A";
 
-  // 1. Console Log for Developer Debugging
+
   console.error(`
 ========== ❌ INVENTORY SYSTEM ERROR ==========
 Timestamp: ${timestamp}
@@ -38,7 +33,6 @@ Code:      ${err.code || "N/A"}
 ================================================
   `);
 
-  // 2. Safety Gate: If headers were already sent, just close the connection
   if (res.headersSent) {
     console.warn("⚠️ Headers already sent. Cannot send JSON error payload.");
     try { res.end(); } catch (e) {}
@@ -72,7 +66,7 @@ Code:      ${err.code || "N/A"}
     }
   };
 
-  // A. Check for AppError (errors thrown manually with statusCode)
+
   if (err.statusCode) {
     status = err.statusCode;
     uiTitle = status === 400 ? "Validation Failed" : "Request Error";

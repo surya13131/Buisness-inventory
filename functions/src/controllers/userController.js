@@ -10,12 +10,8 @@ async function userLogin(data) {
     throw new Error("Email, password and companyId required");
   }
 
-  // ✅ FIX: Initialize bucket inside the function
   const bucket = getBucket();
   const safeEmail = email.toLowerCase();
-  
-  // Note: Your folder name 'Zhian' is case-sensitive! 
-  // Ensure the companyId matches the Storage folder exactly.
   const filePath = `companies/${companyId}/users/${safeEmail}.json`;
   const file = bucket.file(filePath);
 

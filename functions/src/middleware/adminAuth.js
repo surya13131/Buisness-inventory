@@ -7,6 +7,7 @@ async function verifyAdmin(email, password) {
     throw new Error("Admin system not configured");
   }
 
+  
   if (
     email.toLowerCase() !== adminEmail.toLowerCase() ||
     password !== adminPassword

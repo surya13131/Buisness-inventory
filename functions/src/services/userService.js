@@ -9,7 +9,6 @@ async function getUserByEmail(email, companyId) {
   if (!email || !companyId) return null;
 
   const safeEmail = email.toLowerCase();
-  
   const filePath = `companies/${companyId}/users/${safeEmail}.json`;
   const file = bucket.file(filePath);
   const [exists] = await file.exists();
